@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Instant OCR — Diagnostic</title>
-  <meta name="description" content="Single-file OCR with Tesseract.js + diagnostics (mirror tester, explicit non-SIMD core)." />
+  <title>Instant OCR — Diagnostic v10</title>
+  <meta name="description" content="Tesseract.js OCR with explicit worker.load() and mirror diagnostics." />
   <style>
     :root { --bg:#0f172a; --muted:#94a3b8; --accent:#22d3ee; --text:#e5e7eb; }
     html,body{height:100%}
@@ -42,15 +42,15 @@
     .ok{color:#10b981}.warn{color:#f59e0b}.err{color:#ef4444}
   </style>
 
-  <!-- Local tesseract bundle (your repo root) -->
-  <script defer src="./tesseract.min.js?v=9"></script>
+  <!-- Your local Tesseract bundle (at repo root) -->
+  <script defer src="./tesseract.min.js?v=10"></script>
 </head>
 <body>
   <div class="wrap">
     <header>
       <div>
-        <h1>Instant OCR — Diagnostic</h1>
-        <div class="sub">Forces non-SIMD core, lets you pick a language mirror, and shows live tests.</div>
+        <h1>Instant OCR — Diagnostic v10</h1>
+        <div class="sub">Explicit <code>worker.load()</code> + mirror tester. If it still hangs, we’ll see the step.</div>
       </div>
       <button class="btn" id="clearAll">Reset</button>
     </header>
@@ -115,18 +115,17 @@
     </div>
 
     <section class="card" style="margin-top:18px">
-      <div class="hd"><strong>3) Diagnostics</strong><span class="muted">Mirror tester & current config</span></div>
+      <div class="hd"><strong>3) Diagnostics</strong><span class="muted">Mirror tester & step logs</span></div>
       <div class="bd">
         <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap">
           <div>
             <label class="muted">Mirror</label><br/>
             <select id="mirror" class="select">
-              <option value="https://tessdata.projectnaptha.com/4.0.0_best">ProjectNaptha (4.0.0_best)</option>
+              <option value="https://tessdata.projectnaptha.com/4.0.0_best" selected>ProjectNaptha (4.0.0_best)</option>
               <option value="https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_best">jsDelivr (4.0.0_best)</option>
               <option value="https://raw.githubusercontent.com/naptha/tessdata/gh-pages/4.0.0_best">GitHub RAW (4.0.0_best)</option>
-              <option value="https://cdn.staticaly.com/gh/naptha/tessdata/gh-pages/4.0.0_best">Staticaly (4.0.0_best)</option>
-              <option value="https://gcore.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_best">jsDelivr (gcore mirror)</option>
-              <option value="https://huggingface.co/datasets/tesseract-ocr/tessdata/resolve/main/4.0.0_best">HuggingFace mirror</option>
+              <option value="https://gcore.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_best">jsDelivr (gcore)</option>
+              <option value="https://cdn.staticaly.com/gh/naptha/tessdata/gh-pages/4.0.0_best">Staticaly</option>
             </select>
           </div>
           <button id="testMirror" class="btn">Test mirror</button>
@@ -137,9 +136,9 @@
           <div id="logs" class="diag">Ready.</div>
         </div>
         <div style="margin-top:10px" class="muted">
-          Core from: <code id="coreFrom">https://ahm1719.github.io/instant-ocr</code> (non-SIMD) ·
-          Worker: <code id="workerFrom">/worker.min.js?v=9</code> ·
-          Core loader: <code id="coreLoader">/tesseract-core.wasm.js?v=9</code>
+          Core from: <code id="coreFrom"></code> ·
+          Worker: <code id="workerFrom"></code> ·
+          Core loader: <code id="coreLoader"></code>
         </div>
       </div>
     </section>
@@ -157,29 +156,23 @@
     const mirrorSel = $('#mirror'), testMirrorBtn = $('#testMirror'), useMirrorBtn = $('#useMirror');
     const logs = $('#logs');
 
-    // --- config: serve worker + NON-SIMD core from YOUR GitHub Pages ---
+    // Serve worker + NON-SIMD core from YOUR GitHub Pages
     const BASE = 'https://ahm1719.github.io/instant-ocr';
-    const WORKER_URL = `${BASE}/worker.min.js?v=9`;
-    const CORE_URL   = `${BASE}/tesseract-core.wasm.js?v=9`; // non-SIMD loader (auto-fetches tesseract-core.wasm)
+    const WORKER_URL = `${BASE}/worker.min.js?v=10`;
+    const CORE_URL   = `${BASE}/tesseract-core.wasm.js?v=10`; // non-SIMD loader -> fetches tesseract-core.wasm
 
     let currentFile = null;
     let worker = null;
-    let langBase = mirrorSel.value; // current mirror for langPath
+    let langBase = mirrorSel.value;
 
     function log(line, cls){ const el=document.createElement('div'); el.textContent=line; if(cls) el.className=cls; logs.appendChild(el); logs.scrollTop=logs.scrollHeight; }
-    function prettyBytes(b){ if(!Number.isFinite(b)) return '—'; const u=['B','KB','MB','GB']; let i=0; while(b>=1024&&i<u.length-1){b/=1024;i++;} return b.toFixed(i?1:0)+' '+u[i]; }
-    function setPreview(file){
-      currentFile = file;
-      const url = URL.createObjectURL(file);
-      preview.src = url; preview.onload = () => URL.revokeObjectURL(url);
-      meta.textContent = `${file.name} • ${prettyBytes(file.size)}`;
-      previewWrap.style.display=''; progressWrap.style.display='none';
-      progress.value=0; statusEl.textContent='Idle…'; speedEl.textContent='—';
-    }
+    const prettyBytes = b => { if(!Number.isFinite(b)) return '—'; const u=['B','KB','MB','GB']; let i=0; while(b>=1024&&i<u.length-1){b/=1024;i++;} return b.toFixed(i?1:0)+' '+u[i]; };
+    function setPreview(file){ currentFile=file; const url=URL.createObjectURL(file); preview.src=url; preview.onload=()=>URL.revokeObjectURL(url);
+      meta.textContent=`${file.name} • ${prettyBytes(file.size)}`; previewWrap.style.display=''; progressWrap.style.display='none'; progress.value=0; statusEl.textContent='Idle…'; speedEl.textContent='—';}
     function reset(){ currentFile=null; fileInput.value=''; previewWrap.style.display='none'; progressWrap.style.display='none'; out.value=''; confEl.textContent='Confidence —'; timeEl.textContent='Time —'; logs.textContent='Ready.'; }
     function setBusy(b){ [runBtn,changeBtn,langSel,testMirrorBtn,useMirrorBtn].forEach(btn=>btn && (btn.disabled=b)); }
 
-    // drag/paste
+    // Drag/paste
     ['dragenter','dragover'].forEach(e=>drop.addEventListener(e,ev=>{ ev.preventDefault(); drop.classList.add('hover'); }));
     ['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ ev.preventDefault(); drop.classList.remove('hover'); }));
     drop.addEventListener('drop', e=>{ const f=e.dataTransfer.files?.[0]; if(f) setPreview(f); });
@@ -188,26 +181,10 @@
     window.addEventListener('paste', e=>{ const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith('image/')); if(it){ setPreview(it.getAsFile()); }});
     changeBtn?.addEventListener('click', ()=> fileInput.click());
     clearAll?.addEventListener('click', reset);
-
     copyBtn?.addEventListener('click', async ()=>{ try{ await navigator.clipboard.writeText(out.value||''); copyBtn.textContent='Copied!'; setTimeout(()=>copyBtn.textContent='Copy',900);}catch{} });
     dlBtn?.addEventListener('click', ()=>{ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([out.value||''],{type:'text/plain'})); a.download=(currentFile?.name?.replace(/\.[^.]+$/,'')||'ocr')+'.txt'; document.body.appendChild(a); a.click(); a.remove(); });
 
-    async function ensureWorker(){
-      if (worker) return worker;
-      log(`Creating worker… (worker: ${WORKER_URL}, core: ${CORE_URL}, langPath: ${langBase})`, 'muted');
-      worker = await Tesseract.createWorker({
-        workerPath: WORKER_URL,
-        corePath:   CORE_URL,      // non-SIMD loader
-        langPath:   `${langBase}?v=9`,
-        logger: m => {
-          if (m.status) statusEl.textContent = m.status;
-          if (m.status === 'recognizing text' && typeof m.progress === 'number'){ progress.value = m.progress; }
-        }
-      });
-      return worker;
-    }
-
-    // Mirror tester (tries HEAD first; if CORS blocks HEAD, falls back to tiny GET with Range)
+    // Mirror tests
     async function testMirror(base){
       const url = `${base}/eng.traineddata.gz`;
       log(`Testing mirror: ${url}`, 'muted');
@@ -226,17 +203,32 @@
         }
       }
     }
+    testMirrorBtn.addEventListener('click', async ()=>{ setBusy(true); await testMirror(mirrorSel.value); setBusy(false); });
+    useMirrorBtn.addEventListener('click', ()=>{ langBase = mirrorSel.value; logs.textContent = `Selected mirror: ${langBase}`; });
 
-    testMirrorBtn.addEventListener('click', async ()=>{
-      setBusy(true);
-      await testMirror(mirrorSel.value);
-      setBusy(false);
-    });
+    // Ensure worker (now with explicit .load())
+    async function ensureWorker(){
+      if (worker) return worker;
+      log(`Creating worker…`, 'muted');
+      worker = await Tesseract.createWorker({
+        workerPath: WORKER_URL,
+        corePath:   CORE_URL,
+        langPath:   `${langBase}?v=10`,
+        logger: m => {
+          if (m.status) statusEl.textContent = m.status;
+          if (m.status === 'recognizing text' && typeof m.progress === 'number'){ progress.value = m.progress; }
+        }
+      });
+      log('Calling worker.load()…', 'muted');
+      await worker.load();               // <-- IMPORTANT
+      log('worker.load() ✔', 'ok');
+      return worker;
+    }
 
-    useMirrorBtn.addEventListener('click', ()=>{
-      langBase = mirrorSel.value;
-      logs.textContent = `Selected mirror: ${langBase}`;
-    });
+    // Show config
+    $('#coreFrom').textContent   = BASE + ' (non-SIMD)';
+    $('#workerFrom').textContent = new URL(WORKER_URL).pathname + new URL(WORKER_URL).search;
+    $('#coreLoader').textContent = new URL(CORE_URL).pathname + new URL(CORE_URL).search;
 
     // OCR run
     runBtn?.addEventListener('click', async ()=>{
@@ -245,30 +237,38 @@
       progressWrap.style.display=''; progress.value=0; statusEl.textContent='Loading OCR engine…'; speedEl.textContent='—';
       const t0=performance.now();
       try{
-        // quick preflight on the chosen mirror
         const ok = await testMirror(langBase);
-        if(!ok) { throw new Error('Selected language mirror is blocked. Choose another under Diagnostics.'); }
+        if(!ok) throw new Error('Selected language mirror is blocked. Choose another under Diagnostics.');
 
         const w = await ensureWorker();
         const lang = langSel.value || 'eng';
-        await w.loadLanguage(lang);      // will fetch ${langBase}/${lang}.traineddata.gz
-        await w.initialize(lang);
 
-        // Image → ImageData
+        log(`loadLanguage(${lang})…`, 'muted');
+        await w.loadLanguage(lang);
+        log(`loadLanguage(${lang}) ✔`, 'ok');
+
+        log(`initialize(${lang})…`, 'muted');
+        await w.initialize(lang);
+        log(`initialize(${lang}) ✔`, 'ok');
+
+        // Convert image to ImageData
         const imgData = await new Promise((resolve,reject)=>{
           const img=new Image(), url=URL.createObjectURL(currentFile);
           img.onload=()=>{ const MAX=3000; let w=img.width,h=img.height; if(Math.max(w,h)>MAX){const s=MAX/Math.max(w,h); w=Math.round(w*s); h=Math.round(h*s);} const c=document.createElement('canvas'); c.width=w; c.height=h; const ctx=c.getContext('2d'); ctx.drawImage(img,0,0,w,h); URL.revokeObjectURL(url); resolve(ctx.getImageData(0,0,w,h)); };
           img.onerror=reject; img.src=url;
         });
 
+        log('recognize()…', 'muted');
         const { data } = await w.recognize(imgData);
+        log('recognize() ✔', 'ok');
+
         out.value = data.text || '';
         confEl.textContent = `Confidence ${Math.round(data.confidence||0)}%`;
         timeEl.textContent = `Time ${((performance.now()-t0)/1000).toFixed(1)}s`;
         speedEl.textContent = data?.lines?.length ? `${data.lines.length} lines` : 'Done';
 
         await w.terminate(); worker = null;
-        log('OCR done ✔', 'ok');
+        log('worker.terminate() ✔', 'ok');
       }catch(err){
         console.error(err);
         statusEl.textContent='Error';
@@ -278,11 +278,6 @@
         setBusy(false);
       }
     });
-
-    // show config
-    $('#coreFrom').textContent = BASE;
-    $('#workerFrom').textContent = new URL(WORKER_URL).pathname + new URL(WORKER_URL).search;
-    $('#coreLoader').textContent = new URL(CORE_URL).pathname + new URL(CORE_URL).search;
   })();
   </script>
 </body>
