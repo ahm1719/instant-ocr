@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Instant OCR — Diagnostic v10</title>
-  <meta name="description" content="Tesseract.js OCR with explicit worker.load() and mirror diagnostics." />
+  <title>Instant OCR — Diagnostic v11</title>
+  <meta name="description" content="Tesseract.js OCR with safe worker init (no logger in postMessage) and mirror diagnostics." />
   <style>
     :root { --bg:#0f172a; --muted:#94a3b8; --accent:#22d3ee; --text:#e5e7eb; }
     html,body{height:100%}
@@ -42,15 +42,15 @@
     .ok{color:#10b981}.warn{color:#f59e0b}.err{color:#ef4444}
   </style>
 
-  <!-- Your local Tesseract bundle (at repo root) -->
-  <script defer src="./tesseract.min.js?v=10"></script>
+  <!-- Your local Tesseract bundle (kept same origin) -->
+  <script defer src="./tesseract.min.js?v=11"></script>
 </head>
 <body>
   <div class="wrap">
     <header>
       <div>
-        <h1>Instant OCR — Diagnostic v10</h1>
-        <div class="sub">Explicit <code>worker.load()</code> + mirror tester. If it still hangs, we’ll see the step.</div>
+        <h1>Instant OCR — Diagnostic v11</h1>
+        <div class="sub">Safe worker init (no logger in postMessage) + mirror tester. If it fails, the Diagnostics box will show the exact step.</div>
       </div>
       <button class="btn" id="clearAll">Reset</button>
     </header>
@@ -156,14 +156,13 @@
     const mirrorSel = $('#mirror'), testMirrorBtn = $('#testMirror'), useMirrorBtn = $('#useMirror');
     const logs = $('#logs');
 
-    // Serve worker + NON-SIMD core from YOUR GitHub Pages
     const BASE = 'https://ahm1719.github.io/instant-ocr';
-    const WORKER_URL = `${BASE}/worker.min.js?v=10`;
-    const CORE_URL   = `${BASE}/tesseract-core.wasm.js?v=10`; // non-SIMD loader -> fetches tesseract-core.wasm
+    const WORKER_URL = `${BASE}/worker.min.js?v=11`;
+    const CORE_URL   = `${BASE}/tesseract-core.wasm.js?v=11`; // loader that fetches tesseract-core.wasm
+    let langBase = mirrorSel.value;
 
     let currentFile = null;
     let worker = null;
-    let langBase = mirrorSel.value;
 
     function log(line, cls){ const el=document.createElement('div'); el.textContent=line; if(cls) el.className=cls; logs.appendChild(el); logs.scrollTop=logs.scrollHeight; }
     const prettyBytes = b => { if(!Number.isFinite(b)) return '—'; const u=['B','KB','MB','GB']; let i=0; while(b>=1024&&i<u.length-1){b/=1024;i++;} return b.toFixed(i?1:0)+' '+u[i]; };
@@ -184,7 +183,7 @@
     copyBtn?.addEventListener('click', async ()=>{ try{ await navigator.clipboard.writeText(out.value||''); copyBtn.textContent='Copied!'; setTimeout(()=>copyBtn.textContent='Copy',900);}catch{} });
     dlBtn?.addEventListener('click', ()=>{ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([out.value||''],{type:'text/plain'})); a.download=(currentFile?.name?.replace(/\.[^.]+$/,'')||'ocr')+'.txt'; document.body.appendChild(a); a.click(); a.remove(); });
 
-    // Mirror tests
+    // Mirror tester
     async function testMirror(base){
       const url = `${base}/eng.traineddata.gz`;
       log(`Testing mirror: ${url}`, 'muted');
@@ -206,31 +205,34 @@
     testMirrorBtn.addEventListener('click', async ()=>{ setBusy(true); await testMirror(mirrorSel.value); setBusy(false); });
     useMirrorBtn.addEventListener('click', ()=>{ langBase = mirrorSel.value; logs.textContent = `Selected mirror: ${langBase}`; });
 
-    // Ensure worker (now with explicit .load())
-    async function ensureWorker(){
-      if (worker) return worker;
-      log(`Creating worker…`, 'muted');
-      worker = await Tesseract.createWorker({
-        workerPath: WORKER_URL,
-        corePath:   CORE_URL,
-        langPath:   `${langBase}?v=10`,
-        logger: m => {
-          if (m.status) statusEl.textContent = m.status;
-          if (m.status === 'recognizing text' && typeof m.progress === 'number'){ progress.value = m.progress; }
-        }
-      });
-      log('Calling worker.load()…', 'muted');
-      await worker.load();               // <-- IMPORTANT
-      log('worker.load() ✔', 'ok');
-      return worker;
-    }
-
     // Show config
     $('#coreFrom').textContent   = BASE + ' (non-SIMD)';
     $('#workerFrom').textContent = new URL(WORKER_URL).pathname + new URL(WORKER_URL).search;
     $('#coreLoader').textContent = new URL(CORE_URL).pathname + new URL(CORE_URL).search;
 
-    // OCR run
+    // Ensure worker (no logger passed → avoids DataCloneError)
+    async function ensureWorker(){
+      if (worker) return worker;
+      log(`Creating worker…`, 'muted');
+      try{
+        worker = await Tesseract.createWorker({
+          workerPath: WORKER_URL,
+          corePath:   CORE_URL,
+          langPath:   `${langBase}?v=11`
+          // NO logger here — prevents sending a function via postMessage
+          // If needed later, we can add progress with a safe channel.
+        });
+        log('Calling worker.load()…', 'muted');
+        await worker.load();
+        log('worker.load() ✔', 'ok');
+        return worker;
+      }catch(err){
+        log(`createWorker/load failed: ${err?.message||err}`, 'err');
+        throw err;
+      }
+    }
+
+    // OCR
     runBtn?.addEventListener('click', async ()=>{
       if(!currentFile) return alert('Please add an image first.');
       setBusy(true);
