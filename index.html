@@ -1,286 +1,266 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Instant OCR — Diagnostic v11</title>
-  <meta name="description" content="Tesseract.js OCR with safe worker init (no logger in postMessage) and mirror diagnostics." />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Instant OCR — Extract Text</title>
+  <meta name="description" content="Drag, paste or upload an image and extract text locally with Tesseract.js." />
   <style>
-    :root { --bg:#0f172a; --muted:#94a3b8; --accent:#22d3ee; --text:#e5e7eb; }
+    :root{--bg:#0b1020;--card:#0f172a;--muted:#94a3b8;--accent:#22d3ee;--text:#e5e7eb;--ok:#10b981;--warn:#f59e0b;--err:#ef4444}
     html,body{height:100%}
-    body{margin:0;font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Arial;color:var(--text);
-      background:radial-gradient(1200px 800px at 70% 10%,#1f2937 0%,#0b1020 55%,#020617 100%)}
+    body{margin:0;background:radial-gradient(1200px 800px at 70% 10%,#1f2937 0%,#0b1020 55%,#020617 100%);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial}
     .wrap{max-width:1100px;margin:0 auto;padding:24px}
     header{display:flex;gap:18px;align-items:center;justify-content:space-between;margin-bottom:16px}
     h1{font-size:clamp(22px,3vw,32px);margin:0}
-    .sub{color:var(--muted);font-size:14px}
     .grid{display:grid;grid-template-columns:1.1fr 1fr;gap:20px}
     @media (max-width:900px){.grid{grid-template-columns:1fr}}
-    .card{background:linear-gradient(180deg,#0b1224,#0a0f1e);border:1px solid #1f2937;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    .card{background:linear-gradient(180deg,#0b1224,#0a0f1e);border:1px solid #1f2937;border-radius:16px;box-shadow:0 10px 30px rgb(0 0 0 / 25%)}
     .card .hd{padding:16px 18px;border-bottom:1px solid #1f2937;display:flex;align-items:center;justify-content:space-between;gap:10px}
     .card .bd{padding:18px}
-    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-    .muted{color:var(--muted)}
-    .btn{cursor:pointer;border:1px solid #334155;background:#0b1224;color:#e5e7eb;padding:10px 14px;border-radius:12px;font-weight:600;transition:.15s}
-    .btn:hover{transform:translateY(-1px);border-color:#475569}
-    .btn[disabled]{opacity:.5;cursor:not-allowed}
+    .btn{cursor:pointer;border:1px solid #334155;background:#0b1224;color:#e5e7eb;padding:10px 14px;border-radius:12px;font-weight:600}
     .btn.primary{background:linear-gradient(90deg,#06b6d4,#3b82f6);border-color:transparent;color:#fff}
-    .select{background:#0b1224;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:10px 12px}
-    .drop{position:relative;display:grid;place-items:center;min-height:320px;border:2px dashed #334155;border-radius:16px;
-      background:radial-gradient(600px 300px at 50% 0%,#0a162e,#0a0f1f 55%);overflow:hidden}
-    .drop.hover{border-color:var(--accent);box-shadow:inset 0 0 60px rgba(34,211,238,.1)}
-    .drop input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer}
+    .btn[disabled]{opacity:.6;cursor:not-allowed}
+    .select{background:#0b1224;color:#e5e7eb;border:1px solid #334155;border-radius:12px;padding:8px 10px}
+    .drop{position:relative;display:grid;place-items:center;min-height:320px;border:2px dashed #334155;border-radius:16px;background:radial-gradient(600px 300px at 50% 0%,#0a162e,#0a0f1f 55%)}
     .preview{max-height:360px;max-width:100%;display:block;border-radius:12px;border:1px solid #334155}
     textarea{width:100%;min-height:360px;background:#020617;border:1px solid #334155;color:#e5e7eb;border-radius:12px;padding:12px;resize:vertical}
-    .footer{margin-top:8px;display:flex;gap:10px;align-items:center;justify-content:space-between;color:var(--muted)}
-    progress{width:100%;height:10px;appearance:none}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .muted{color:var(--muted)}
+    .tag{font-size:12px;padding:4px 8px;border-radius:999px;background:#0b1224;border:1px solid #334155;color:#cbd5e1}
+    progress{width:100%;height:10px;-webkit-appearance:none;appearance:none}
     progress::-webkit-progress-bar{background:#0b1224;border-radius:999px}
     progress::-webkit-progress-value{background:linear-gradient(90deg,#22d3ee,#3b82f6);border-radius:999px}
-    .tag{font-size:12px;padding:4px 8px;border-radius:999px;background:#0b1224;border:1px solid #334155;color:#cbd5e1}
-    .kbd{border:1px solid #334155;border-bottom-color:#1f2937;background:#0b1224;padding:2px 6px;border-radius:6px}
-    .diag{font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;background:#0b1224;border:1px solid #334155;border-radius:12px;padding:10px;white-space:pre-wrap;max-height:280px;overflow:auto}
-    .ok{color:#10b981}.warn{color:#f59e0b}.err{color:#ef4444}
   </style>
-
-  <!-- Your local Tesseract bundle (kept same origin) -->
-  <script defer src="./tesseract.min.js?v=11"></script>
+  <!-- Main library (v5) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <div>
-        <h1>Instant OCR — Diagnostic v11</h1>
-        <div class="sub">Safe worker init (no logger in postMessage) + mirror tester. If it fails, the Diagnostics box will show the exact step.</div>
-      </div>
-      <button class="btn" id="clearAll">Reset</button>
-    </header>
-
-    <div class="grid">
-      <section class="card">
-        <div class="hd">
-          <div class="row"><strong>1) Add an image</strong><span class="muted">PNG • JPG • HEIC* • PDF (first page)</span></div>
-          <div class="row">
-            <label class="row" for="lang"><span class="muted">Language</span>
-              <select class="select" id="lang">
-                <option value="eng" selected>English (eng)</option>
-                <option value="ara">Arabic (ara)</option>
-              </select>
-            </label>
-          </div>
-        </div>
-        <div class="bd">
-          <div id="drop" class="drop" tabindex="0" aria-label="Drop zone">
-            <input id="file" type="file" accept="image/*,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.heic,.heif,.pdf" />
-            <div style="text-align:center;max-width:520px;padding:12px">
-              <p style="font-size:18px;margin:0 0 8px">Drag & Drop image here</p>
-              <p class="muted">or click to browse · paste with <span class="kbd">Ctrl/⌘+V</span></p>
-            </div>
-          </div>
-          <div id="previewWrap" style="display:none;margin-top:14px">
-            <img id="preview" class="preview" alt="Preview" />
-            <div class="footer">
-              <span class="muted" id="meta">—</span>
-              <div class="row">
-                <button class="btn" id="changeImage">Change image</button>
-                <button class="btn primary" id="run">Extract Text</button>
-              </div>
-            </div>
-            <div id="progressWrap" style="display:none;margin-top:10px">
-              <progress id="progress" max="1" value="0"></progress>
-              <div class="row" style="justify-content:space-between">
-                <span class="muted" id="status">Idle…</span>
-                <span class="tag" id="speed">—</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="hd"><strong>2) Result</strong><span class="muted">Copy / download the extracted text</span></div>
-        <div class="bd">
-          <textarea id="out" placeholder="Your extracted text will appear here…"></textarea>
-          <div class="footer">
-            <div class="row">
-              <button class="btn" id="copy">Copy</button>
-              <button class="btn" id="download">Download .txt</button>
-            </div>
-            <div class="row">
-              <span class="tag" id="confidence">Confidence —</span>
-              <span class="tag" id="time">Time —</span>
-            </div>
-          </div>
-        </div>
-      </section>
+<div class="wrap">
+  <header>
+    <h1>Instant OCR</h1>
+    <div class="row">
+      <button class="btn" id="reset">Reset</button>
     </div>
+  </header>
 
-    <section class="card" style="margin-top:18px">
-      <div class="hd"><strong>3) Diagnostics</strong><span class="muted">Mirror tester & step logs</span></div>
+  <div class="grid">
+    <section class="card">
+      <div class="hd">
+        <strong>1) Add an image</strong>
+        <label class="row" for="lang"><span class="muted">Language</span>
+          <select id="lang" class="select">
+            <option value="eng" selected>English (eng)</option>
+            <option value="ara">Arabic (ara)</option>
+            <option value="fra">French (fra)</option>
+            <option value="spa">Spanish (spa)</option>
+            <option value="deu">German (deu)</option>
+          </select>
+        </label>
+      </div>
       <div class="bd">
-        <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap">
-          <div>
-            <label class="muted">Mirror</label><br/>
-            <select id="mirror" class="select">
-              <option value="https://tessdata.projectnaptha.com/4.0.0_best" selected>ProjectNaptha (4.0.0_best)</option>
-              <option value="https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_best">jsDelivr (4.0.0_best)</option>
-              <option value="https://raw.githubusercontent.com/naptha/tessdata/gh-pages/4.0.0_best">GitHub RAW (4.0.0_best)</option>
-              <option value="https://gcore.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_best">jsDelivr (gcore)</option>
-              <option value="https://cdn.staticaly.com/gh/naptha/tessdata/gh-pages/4.0.0_best">Staticaly</option>
-            </select>
+        <div class="drop" id="drop">
+          <input id="file" type="file"
+                 accept="image/*,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.heic,.heif,.pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer">
+          <div style="text-align:center;max-width:520px;padding:12px;">
+            <p style="font-size:18px;margin:0 0 8px;">Drag & Drop image here</p>
+            <p class="muted">or click to browse · Paste with <kbd>Ctrl/⌘ + V</kbd></p>
           </div>
-          <button id="testMirror" class="btn">Test mirror</button>
-          <button id="useMirror" class="btn primary">Use this mirror</button>
         </div>
-        <div style="margin-top:12px">
-          <div class="muted" style="margin-bottom:6px">Status & logs</div>
-          <div id="logs" class="diag">Ready.</div>
+
+        <div id="previewWrap" style="display:none;margin-top:14px;">
+          <img id="preview" class="preview" alt="Preview">
+          <div class="row" style="justify-content:space-between;margin-top:10px;">
+            <span class="muted" id="meta">—</span>
+            <div class="row">
+              <button class="btn" id="change">Change image</button>
+              <button class="btn primary" id="run">Extract Text</button>
+            </div>
+          </div>
+          <div id="progressWrap" style="display:none;margin-top:10px;">
+            <progress id="progress" max="1" value="0"></progress>
+            <div class="row" style="justify-content:space-between;">
+              <span class="muted" id="status">Idle…</span>
+              <span class="tag" id="core">Core —</span>
+            </div>
+          </div>
         </div>
-        <div style="margin-top:10px" class="muted">
-          Core from: <code id="coreFrom"></code> ·
-          Worker: <code id="workerFrom"></code> ·
-          Core loader: <code id="coreLoader"></code>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="hd"><strong>2) Result</strong><span class="muted">Copy / download the extracted text</span></div>
+      <div class="bd">
+        <textarea id="out" placeholder="Your extracted text will appear here…"></textarea>
+        <div class="row" style="justify-content:space-between;margin-top:8px;">
+          <div class="row">
+            <button class="btn" id="copy">Copy</button>
+            <button class="btn" id="download">Download .txt</button>
+          </div>
+          <div class="row">
+            <span class="tag" id="confidence">Confidence —</span>
+            <span class="tag" id="time">Time —</span>
+          </div>
         </div>
       </div>
     </section>
   </div>
+</div>
 
-  <script>
-  (function(){
-    const $ = s => document.querySelector(s);
-    const fileInput = $('#file'), drop = $('#drop');
-    const previewWrap = $('#previewWrap'), preview = $('#preview'), meta = $('#meta');
-    const runBtn = $('#run'), changeBtn = $('#changeImage');
-    const progressWrap = $('#progressWrap'), progress = $('#progress'), statusEl = $('#status'), speedEl = $('#speed');
-    const out = $('#out'), copyBtn = $('#copy'), dlBtn = $('#download');
-    const confEl = $('#confidence'), timeEl = $('#time'), clearAll = $('#clearAll'), langSel = $('#lang');
-    const mirrorSel = $('#mirror'), testMirrorBtn = $('#testMirror'), useMirrorBtn = $('#useMirror');
-    const logs = $('#logs');
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const fileInput = $('#file');
+  const drop = $('#drop');
+  const previewWrap = $('#previewWrap');
+  const preview = $('#preview');
+  const meta = $('#meta');
+  const runBtn = $('#run');
+  const changeBtn = $('#change');
+  const progressWrap = $('#progressWrap');
+  const progress = $('#progress');
+  const statusEl = $('#status');
+  const coreTag = $('#core');
+  const out = $('#out');
+  const copyBtn = $('#copy');
+  const dlBtn = $('#download');
+  const confEl = $('#confidence');
+  const timeEl = $('#time');
+  const resetBtn = $('#reset');
+  const langSel = $('#lang');
 
-    const BASE = 'https://ahm1719.github.io/instant-ocr';
-    const WORKER_URL = `${BASE}/worker.min.js?v=11`;
-    const CORE_URL   = `${BASE}/tesseract-core.wasm.js?v=11`; // loader that fetches tesseract-core.wasm
-    let langBase = mirrorSel.value;
+  let currentFile = null;
 
-    let currentFile = null;
-    let worker = null;
+  function prettyBytes(bytes){
+    if (!Number.isFinite(bytes)) return '—';
+    const units = ['B','KB','MB','GB']; let i=0;
+    while(bytes>=1024 && i<units.length-1){ bytes/=1024; i++; }
+    return bytes.toFixed(i?1:0)+' '+units[i];
+  }
 
-    function log(line, cls){ const el=document.createElement('div'); el.textContent=line; if(cls) el.className=cls; logs.appendChild(el); logs.scrollTop=logs.scrollHeight; }
-    const prettyBytes = b => { if(!Number.isFinite(b)) return '—'; const u=['B','KB','MB','GB']; let i=0; while(b>=1024&&i<u.length-1){b/=1024;i++;} return b.toFixed(i?1:0)+' '+u[i]; };
-    function setPreview(file){ currentFile=file; const url=URL.createObjectURL(file); preview.src=url; preview.onload=()=>URL.revokeObjectURL(url);
-      meta.textContent=`${file.name} • ${prettyBytes(file.size)}`; previewWrap.style.display=''; progressWrap.style.display='none'; progress.value=0; statusEl.textContent='Idle…'; speedEl.textContent='—';}
-    function reset(){ currentFile=null; fileInput.value=''; previewWrap.style.display='none'; progressWrap.style.display='none'; out.value=''; confEl.textContent='Confidence —'; timeEl.textContent='Time —'; logs.textContent='Ready.'; }
-    function setBusy(b){ [runBtn,changeBtn,langSel,testMirrorBtn,useMirrorBtn].forEach(btn=>btn && (btn.disabled=b)); }
+  function setPreview(file){
+    currentFile = file;
+    const url = URL.createObjectURL(file);
+    preview.src = url;
+    preview.onload = () => URL.revokeObjectURL(url);
+    meta.textContent = `${file.name} • ${prettyBytes(file.size)}`;
+    previewWrap.style.display = '';
+    progressWrap.style.display = 'none';
+    progress.value = 0; statusEl.textContent = 'Idle…'; coreTag.textContent = 'Core —';
+  }
 
-    // Drag/paste
-    ['dragenter','dragover'].forEach(e=>drop.addEventListener(e,ev=>{ ev.preventDefault(); drop.classList.add('hover'); }));
-    ['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ ev.preventDefault(); drop.classList.remove('hover'); }));
-    drop.addEventListener('drop', e=>{ const f=e.dataTransfer.files?.[0]; if(f) setPreview(f); });
-    drop.addEventListener('click', ()=> fileInput.click());
-    fileInput.addEventListener('change', e=>{ const f=e.target.files?.[0]; if(f) setPreview(f); });
-    window.addEventListener('paste', e=>{ const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith('image/')); if(it){ setPreview(it.getAsFile()); }});
-    changeBtn?.addEventListener('click', ()=> fileInput.click());
-    clearAll?.addEventListener('click', reset);
-    copyBtn?.addEventListener('click', async ()=>{ try{ await navigator.clipboard.writeText(out.value||''); copyBtn.textContent='Copied!'; setTimeout(()=>copyBtn.textContent='Copy',900);}catch{} });
-    dlBtn?.addEventListener('click', ()=>{ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([out.value||''],{type:'text/plain'})); a.download=(currentFile?.name?.replace(/\.[^.]+$/,'')||'ocr')+'.txt'; document.body.appendChild(a); a.click(); a.remove(); });
+  function reset(){
+    currentFile = null; fileInput.value = '';
+    previewWrap.style.display = 'none'; progressWrap.style.display = 'none';
+    out.value = ''; confEl.textContent = 'Confidence —'; timeEl.textContent = 'Time —';
+  }
 
-    // Mirror tester
-    async function testMirror(base){
-      const url = `${base}/eng.traineddata.gz`;
-      log(`Testing mirror: ${url}`, 'muted');
-      try{
-        let r = await fetch(url, { method:'HEAD', mode:'cors', cache:'no-store' });
-        if (!r.ok) throw new Error(`HEAD ${r.status}`);
-        log(`✔ HEAD OK (${r.status}) — mirror reachable`, 'ok'); return true;
-      }catch(e1){
-        log(`HEAD failed (${e1.message}). Trying GET range…`, 'warn');
-        try{
-          let r2 = await fetch(url, { method:'GET', mode:'cors', headers:{ 'Range':'bytes=0-0' }, cache:'no-store' });
-          if (!r2.ok) throw new Error(`GET ${r2.status}`);
-          log(`✔ GET range OK (${r2.status}) — mirror reachable`, 'ok'); return true;
-        }catch(e2){
-          log(`✖ Mirror blocked (${e2.message})`, 'err'); return false;
+  // drag/paste
+  drop.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', e => { const f=e.target.files?.[0]; if(f) setPreview(f); });
+  window.addEventListener('paste', e => {
+    const item = [...(e.clipboardData?.items||[])].find(i => i.type.startsWith('image/'));
+    if(item){ setPreview(item.getAsFile()); }
+  });
+  changeBtn?.addEventListener('click', ()=> fileInput.click());
+  resetBtn?.addEventListener('click', reset);
+
+  // helpers: image->ImageData
+  function fileToImageData(file){
+    return new Promise((resolve, reject)=>{
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const MAX = 3000;
+        let w = img.width, h = img.height;
+        if (Math.max(w,h) > MAX){
+          const s = MAX/Math.max(w,h); w = Math.round(w*s); h = Math.round(h*s);
         }
-      }
-    }
-    testMirrorBtn.addEventListener('click', async ()=>{ setBusy(true); await testMirror(mirrorSel.value); setBusy(false); });
-    useMirrorBtn.addEventListener('click', ()=>{ langBase = mirrorSel.value; logs.textContent = `Selected mirror: ${langBase}`; });
-
-    // Show config
-    $('#coreFrom').textContent   = BASE + ' (non-SIMD)';
-    $('#workerFrom').textContent = new URL(WORKER_URL).pathname + new URL(WORKER_URL).search;
-    $('#coreLoader').textContent = new URL(CORE_URL).pathname + new URL(CORE_URL).search;
-
-    // Ensure worker (no logger passed → avoids DataCloneError)
-    async function ensureWorker(){
-      if (worker) return worker;
-      log(`Creating worker…`, 'muted');
-      try{
-        worker = await Tesseract.createWorker({
-          workerPath: WORKER_URL,
-          corePath:   CORE_URL,
-          langPath:   `${langBase}?v=11`
-          // NO logger here — prevents sending a function via postMessage
-          // If needed later, we can add progress with a safe channel.
-        });
-        log('Calling worker.load()…', 'muted');
-        await worker.load();
-        log('worker.load() ✔', 'ok');
-        return worker;
-      }catch(err){
-        log(`createWorker/load failed: ${err?.message||err}`, 'err');
-        throw err;
-      }
-    }
-
-    // OCR
-    runBtn?.addEventListener('click', async ()=>{
-      if(!currentFile) return alert('Please add an image first.');
-      setBusy(true);
-      progressWrap.style.display=''; progress.value=0; statusEl.textContent='Loading OCR engine…'; speedEl.textContent='—';
-      const t0=performance.now();
-      try{
-        const ok = await testMirror(langBase);
-        if(!ok) throw new Error('Selected language mirror is blocked. Choose another under Diagnostics.');
-
-        const w = await ensureWorker();
-        const lang = langSel.value || 'eng';
-
-        log(`loadLanguage(${lang})…`, 'muted');
-        await w.loadLanguage(lang);
-        log(`loadLanguage(${lang}) ✔`, 'ok');
-
-        log(`initialize(${lang})…`, 'muted');
-        await w.initialize(lang);
-        log(`initialize(${lang}) ✔`, 'ok');
-
-        // Convert image to ImageData
-        const imgData = await new Promise((resolve,reject)=>{
-          const img=new Image(), url=URL.createObjectURL(currentFile);
-          img.onload=()=>{ const MAX=3000; let w=img.width,h=img.height; if(Math.max(w,h)>MAX){const s=MAX/Math.max(w,h); w=Math.round(w*s); h=Math.round(h*s);} const c=document.createElement('canvas'); c.width=w; c.height=h; const ctx=c.getContext('2d'); ctx.drawImage(img,0,0,w,h); URL.revokeObjectURL(url); resolve(ctx.getImageData(0,0,w,h)); };
-          img.onerror=reject; img.src=url;
-        });
-
-        log('recognize()…', 'muted');
-        const { data } = await w.recognize(imgData);
-        log('recognize() ✔', 'ok');
-
-        out.value = data.text || '';
-        confEl.textContent = `Confidence ${Math.round(data.confidence||0)}%`;
-        timeEl.textContent = `Time ${((performance.now()-t0)/1000).toFixed(1)}s`;
-        speedEl.textContent = data?.lines?.length ? `${data.lines.length} lines` : 'Done';
-
-        await w.terminate(); worker = null;
-        log('worker.terminate() ✔', 'ok');
-      }catch(err){
-        console.error(err);
-        statusEl.textContent='Error';
-        log(`Error: ${err?.message||err}`, 'err');
-        alert('OCR failed: ' + (err?.message || 'unknown error'));
-      }finally{
-        setBusy(false);
-      }
+        const c = document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        URL.revokeObjectURL(url);
+        resolve(c.getContext('2d').getImageData(0,0,w,h));
+      };
+      img.onerror = reject;
+      img.src = url;
     });
-  })();
-  </script>
+  }
+
+  // create worker with fallback (non-SIMD -> SIMD)
+  async function createWorkerWithFallback(){
+    const base = 'https://cdn.jsdelivr.net/npm';
+    const langBase = 'https://tessdata.projectnaptha.com/4.0.0_best';
+
+    // 1) NON-SIMD first (most compatible)
+    try{
+      const w1 = await Tesseract.createWorker({
+        workerPath: `${base}/tesseract.js@5/dist/worker.min.js`,
+        corePath:   `${base}/tesseract.js-core@5.0.3/tesseract-core.wasm.js`,
+        langPath:   langBase
+        // no logger here (prevents DataCloneError in strict environments)
+      });
+      coreTag.textContent = 'Core non-SIMD';
+      return w1;
+    }catch(e){
+      console.warn('Non-SIMD core failed, retrying with SIMD…', e);
+    }
+
+    // 2) SIMD fallback
+    const w2 = await Tesseract.createWorker({
+      workerPath: `${base}/tesseract.js@5/dist/worker.min.js`,
+      corePath:   `${base}/tesseract.js-core@5.0.3/tesseract-core-simd-lstm.wasm.js`,
+      langPath:   langBase
+    });
+    coreTag.textContent = 'Core SIMD-LSTM';
+    return w2;
+  }
+
+  runBtn.addEventListener('click', async ()=>{
+    if(!currentFile) { alert('Please add an image first.'); return; }
+    runBtn.disabled = true; changeBtn.disabled = true; langSel.disabled = true;
+    progressWrap.style.display = ''; progress.value = 0; statusEl.textContent = 'Creating worker…';
+
+    const t0 = performance.now();
+    try{
+      const worker = await createWorkerWithFallback();
+
+      const lang = langSel.value || 'eng';
+      statusEl.textContent = `Loading ${lang}…`;
+      await worker.loadLanguage(lang);
+      await worker.initialize(lang);
+
+      statusEl.textContent = 'Recognizing…';
+      const imageData = await fileToImageData(currentFile);
+      const { data } = await worker.recognize(imageData);
+
+      out.value = data.text || '';
+      confEl.textContent = `Confidence ${Math.round(data.confidence||0)}%`;
+      timeEl.textContent = `Time ${((performance.now()-t0)/1000).toFixed(1)}s`;
+
+      await worker.terminate();
+      statusEl.textContent = 'Done';
+    }catch(err){
+      console.error(err);
+      statusEl.textContent = 'Error';
+      alert('OCR failed to start. Likely a blocked or mismatched core. See console for details.');
+    }finally{
+      runBtn.disabled = false; changeBtn.disabled = false; langSel.disabled = false;
+    }
+  });
+
+  // copy & download
+  copyBtn.addEventListener('click', async ()=>{
+    try{ await navigator.clipboard.writeText(out.value||''); copyBtn.textContent='Copied!'; setTimeout(()=>copyBtn.textContent='Copy',900); }
+    catch{ alert('Copy failed. Select the text and copy manually.'); }
+  });
+  dlBtn.addEventListener('click', ()=>{
+    const blob = new Blob([out.value||''], {type:'text/plain'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'ocr.txt';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=> URL.revokeObjectURL(a.href), 300);
+  });
+})();
+</script>
 </body>
 </html>
