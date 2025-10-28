@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Instant OCR — Extract Text from Image</title>
   <meta name="description" content="A single-file webpage that extracts text from an image using Tesseract.js. Drag & drop, paste, or upload an image; copy or download the text." />
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <style>
     :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --accent:#22d3ee; --text:#e5e7eb; --ok:#10b981; --warn:#f59e0b; --err:#ef4444; }
     html, body { height: 100%; }
@@ -43,8 +42,9 @@
     .kbd { border:1px solid #334155; border-bottom-color:#1f2937; background:#0b1224; padding:2px 6px; border-radius:6px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
     .note { font-size:12px; color:#9ca3af; }
   </style>
-  <!-- Tesseract.js v5 from jsDelivr CDN -->
-  <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <!-- Load Tesseract.js LOCALLY (no CDN) -->
+  <script defer src="./tesseract.min.js"></script>
 </head>
 <body>
   <div class="wrap">
@@ -139,7 +139,7 @@
           <li>Use clear, sharp images with good lighting and high contrast.</li>
           <li>Crop away borders/backgrounds; rotate to upright orientation.</li>
           <li>Pick the correct <strong>Language</strong> (Arabic ≠ English).</li>
-          <li>For multi‑column documents, try scanning each column separately.</li>
+          <li>For multi-column documents, try scanning each column separately.</li>
           <li>If results seem slow, your browser may be throttling — try closing heavy tabs.</li>
         </ul>
         <div style="display:flex; gap:10px; justify-content:flex-end;">
@@ -178,7 +178,6 @@
     let currentFile = null;
     let worker = null;
 
-    // Helpers
     function prettyBytes(bytes){
       if (!Number.isFinite(bytes)) return '—';
       const units = ['B','KB','MB','GB'];
@@ -249,20 +248,17 @@
 
     clearAll.addEventListener('click', reset);
 
-    // OCR core
+    // --- OCR worker using LOCAL assets ---
     async function ensureWorker(){
-      if(worker) return worker;
-      // Create a dedicated Tesseract worker
+      if (worker) return worker;
       worker = await Tesseract.createWorker({
-        // Explicit paths so corporate firewalls/CDN blocks are easier to spot/avoid
-        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-        corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.3/tesseract-core-simd-lstm.wasm.js',
-        // Use jsDelivr for language files (same CDN as the script you confirmed works)
-        langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.3/lang',
+        workerPath: './worker.min.js',
+        corePath: './tesseract-core.wasm.js', // auto-loads ./tesseract-core.wasm
+        langPath: './lang',                    // eng.traineddata.gz is here
         logger: m => {
-          if(m.status === 'recognizing text' && typeof m.progress === 'number'){
-            progress.value = m.progress; statusEl.textContent = m.status; }
-          else if(m.status){ statusEl.textContent = m.status; }
+          if (m.status === 'recognizing text' && typeof m.progress === 'number') {
+            progress.value = m.progress; statusEl.textContent = m.status;
+          } else if (m.status) { statusEl.textContent = m.status; }
         }
       });
       return worker;
@@ -289,28 +285,29 @@
       });
     }
 
-    runBtn.addEventListener('click', async ()=>{
+    document.getElementById('run').addEventListener('click', async ()=>{
       if(!currentFile) return alert('Please add an image first.');
       try {
+        document.activeElement?.blur?.();
         runBtn.disabled = true; changeBtn.disabled = true; langSel.disabled = true;
         progressWrap.style.display = '';
         progress.value = 0; statusEl.textContent = 'Loading OCR engine…'; speedEl.textContent='—';
         const t0 = performance.now();
 
-        const worker = await ensureWorker();
+        const w = await ensureWorker();
         const lang = langSel.value || 'eng';
-        await worker.loadLanguage(lang);
-        await worker.initialize(lang);
+        await w.loadLanguage(lang);
+        await w.initialize(lang);
 
         const imageData = await fileToImageData(currentFile);
-        const { data } = await worker.recognize(imageData);
+        const { data } = await w.recognize(imageData);
         out.value = data.text || '';
         confEl.textContent = `Confidence ${Math.round((data.confidence||0))}%`;
-        timeEl.textContent = `Time ${( (performance.now()-t0)/1000 ).toFixed(1)}s`;
+        timeEl.textContent = `Time ${((performance.now()-t0)/1000).toFixed(1)}s`;
         speedEl.textContent = data?.lines?.length ? `${data.lines.length} lines` : 'Done';
 
-        await worker.terminate(); // free memory after each run
-        workerRef = null; // allow re-init on next run with new language
+        await w.terminate();
+        worker = null; // allow fresh init next run (e.g., different language)
       } catch (err) {
         console.error(err);
         alert('OCR failed. Try another image or language.');
